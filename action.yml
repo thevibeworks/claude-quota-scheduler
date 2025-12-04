@@ -48,6 +48,12 @@ outputs:
   summary:
     description: "Human-readable summary"
     value: ${{ steps.result.outputs.summary }}
+  claude_response:
+    description: "What claude said/drew"
+    value: ${{ steps.ping.outputs.response }}
+  bark_message:
+    description: "Claude-generated notification message"
+    value: ${{ steps.ping.outputs.bark_message }}
 
 runs:
   using: "composite"
@@ -89,22 +95,50 @@ runs:
         if [ "$DRY" = "true" ]; then
           echo "[DRY RUN] Would send: '$PROMPT' to model $MODEL"
           echo "conclusion=success" >> $GITHUB_OUTPUT
+          echo "bark_message=dry run - no actual ping" >> $GITHUB_OUTPUT
           exit 0
         fi
 
         echo "Sending ghost ping..."
         export PATH="$HOME/.local/bin:$PATH"
 
-        # Run claude with timeout
-        if timeout 120 claude -p "$PROMPT" \
+        # append bark message request to prompt
+        FULL_PROMPT="$PROMPT
+
+also write a funny one-liner (max 50 chars) for a push notification about this. put it on its own line starting with BARK:"
+
+        # capture output
+        RESPONSE=$(timeout 120 claude -p "$FULL_PROMPT" \
           --model "$MODEL" \
           --max-turns 1 \
           --dangerously-skip-permissions \
-          2>&1; then
+          2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
+
+        echo "$RESPONSE"
+
+        if [ $EXIT_CODE -eq 0 ]; then
           echo "conclusion=success" >> $GITHUB_OUTPUT
+
+          # extract bark message (line starting with BARK:)
+          BARK_MSG=$(echo "$RESPONSE" | grep -i "^BARK:" | head -1 | sed 's/^BARK:[[:space:]]*//' | cut -c1-50)
+          if [ -z "$BARK_MSG" ]; then
+            BARK_MSG="claude woke up and did a thing"
+          fi
+
+          # escape for github output
+          echo "bark_message=$BARK_MSG" >> $GITHUB_OUTPUT
+
+          # save full response (escape newlines)
+          {
+            echo 'response<<EOF'
+            echo "$RESPONSE"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
           echo "Ping successful!"
         else
           echo "conclusion=failure" >> $GITHUB_OUTPUT
+          echo "bark_message=claude refused to wake up" >> $GITHUB_OUTPUT
           echo "::warning::Ping failed or timed out"
         fi
       env:
