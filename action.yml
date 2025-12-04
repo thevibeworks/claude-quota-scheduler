@@ -90,7 +90,7 @@ runs:
         DRY: ${{ inputs.dry_run }}
         PROMPT: ${{ inputs.ping_prompt }}
         MODEL: ${{ inputs.model }}
-        BARK_SUFFIX: "also write a funny one-liner (max 50 chars) for a push notification. put it on a line starting with BARK"
+        BARK_SUFFIX: "now roast me in under 50 chars. be unhinged. put it on a line starting with BARK"
       run: |
         if [ "$DRY" = "true" ]; then
           echo "[DRY RUN] Would send to model $MODEL"
