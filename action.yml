@@ -103,9 +103,10 @@ runs:
         export PATH="$HOME/.local/bin:$PATH"
 
         # append bark message request to prompt
+        BARK_TAG="BARK"
         FULL_PROMPT="$PROMPT
 
-also write a funny one-liner (max 50 chars) for a push notification about this. put it on its own line starting with BARK:"
+also write a funny one-liner (max 50 chars) for a push notification. put it on its own line starting with ${BARK_TAG}:"
 
         # capture output
         RESPONSE=$(timeout 120 claude -p "$FULL_PROMPT" \
