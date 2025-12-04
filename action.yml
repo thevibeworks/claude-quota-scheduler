@@ -7,17 +7,14 @@ branding:
   color: "orange"
 
 inputs:
-  # Authentication
   oauth_token:
     description: "Claude Code OAuth token"
     required: false
   anthropic_api_key:
     description: "Anthropic API key (alternative to oauth_token)"
     required: false
-
-  # Scheduler config
   account_name:
-    description: "Account name for logs/identification"
+    description: "Account name for logs"
     required: false
     default: "default"
   timezone:
@@ -32,8 +29,6 @@ inputs:
     description: "Model to use"
     required: false
     default: "claude-sonnet-4-20250514"
-
-  # Options
   dry_run:
     description: "Log without pinging"
     required: false
@@ -42,16 +37,6 @@ inputs:
     description: "Summary style: minimal, detailed, ascii-art"
     required: false
     default: "ascii-art"
-
-  # Cloud providers (pass-through to base-action)
-  use_bedrock:
-    description: "Use AWS Bedrock"
-    required: false
-    default: "false"
-  use_vertex:
-    description: "Use Google Vertex AI"
-    required: false
-    default: "false"
 
 outputs:
   success:
@@ -68,7 +53,6 @@ runs:
   using: "composite"
   steps:
     - name: Start
-      id: start
       shell: bash
       run: |
         echo "=============================================="
@@ -76,27 +60,56 @@ runs:
         echo "  Account: ${{ inputs.account_name }}"
         echo "  Timezone: ${{ inputs.timezone }}"
         echo "=============================================="
-        echo "start_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
-    - name: Dry Run
-      if: inputs.dry_run == 'true'
-      id: dry_run
+    - name: Install Claude CLI
+      if: inputs.dry_run != 'true'
       shell: bash
       run: |
-        echo "[DRY RUN] Would send: '${{ inputs.ping_prompt }}'"
-        echo "conclusion=success" >> $GITHUB_OUTPUT
+        echo "Installing Claude Code CLI..."
+        for attempt in 1 2 3; do
+          if curl -fsSL https://claude.ai/install.sh | bash; then
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.local/bin:$PATH"
+            echo "Claude CLI installed: $(claude --version 2>/dev/null || echo 'installed')"
+            break
+          fi
+          [ $attempt -eq 3 ] && { echo "::error::Failed to install Claude CLI"; exit 1; }
+          sleep 5
+        done
 
     - name: Ghost Ping
-      if: inputs.dry_run != 'true'
       id: ping
-      uses: anthropics/claude-code-action-base@beta
-      with:
-        prompt: ${{ inputs.ping_prompt }}
-        claude_code_oauth_token: ${{ inputs.oauth_token }}
-        anthropic_api_key: ${{ inputs.anthropic_api_key }}
-        use_bedrock: ${{ inputs.use_bedrock }}
-        use_vertex: ${{ inputs.use_vertex }}
-        claude_args: "--model ${{ inputs.model }} --max-turns 1 --dangerously-skip-permissions"
+      shell: bash
+      run: |
+        ACCOUNT="${{ inputs.account_name }}"
+        DRY="${{ inputs.dry_run }}"
+        PROMPT="${{ inputs.ping_prompt }}"
+        MODEL="${{ inputs.model }}"
+
+        if [ "$DRY" = "true" ]; then
+          echo "[DRY RUN] Would send: '$PROMPT' to model $MODEL"
+          echo "conclusion=success" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "Sending ghost ping..."
+        export PATH="$HOME/.local/bin:$PATH"
+
+        # Run claude with timeout
+        if timeout 120 claude -p "$PROMPT" \
+          --model "$MODEL" \
+          --max-turns 1 \
+          --dangerously-skip-permissions \
+          2>&1; then
+          echo "conclusion=success" >> $GITHUB_OUTPUT
+          echo "Ping successful!"
+        else
+          echo "conclusion=failure" >> $GITHUB_OUTPUT
+          echo "::warning::Ping failed or timed out"
+        fi
+      env:
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.oauth_token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
 
     - name: Result
       id: result
@@ -106,17 +119,10 @@ runs:
         ACCOUNT="${{ inputs.account_name }}"
         TZ="${{ inputs.timezone }}"
         STYLE="${{ inputs.summary_style }}"
-        DRY="${{ inputs.dry_run }}"
-
-        # Get conclusion from either dry_run or ping step
-        if [ "$DRY" = "true" ]; then
-          CONCLUSION="${{ steps.dry_run.outputs.conclusion }}"
-        else
-          CONCLUSION="${{ steps.ping.outputs.conclusion }}"
-        fi
+        CONCLUSION="${{ steps.ping.outputs.conclusion }}"
 
         # Calculate window end (5h from now)
-        WINDOW_END=$(date -u -d "+5 hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+5H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+        WINDOW_END=$(date -u -d "+5 hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+5H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "N/A")
 
         if [ "$CONCLUSION" = "success" ]; then
           SUCCESS="true"
@@ -125,49 +131,44 @@ runs:
           SUCCESS="false"
           STATUS="FAILED"
         fi
-        [ "$DRY" = "true" ] && STATUS="DRY_RUN"
+        [ "${{ inputs.dry_run }}" = "true" ] && STATUS="DRY_RUN"
 
         echo "success=$SUCCESS" >> $GITHUB_OUTPUT
         echo "window_end=$WINDOW_END" >> $GITHUB_OUTPUT
 
-        # Generate summary
         NOW=$(TZ="$TZ" date "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date "+%Y-%m-%d %H:%M:%S")
 
         if [ "$STYLE" = "ascii-art" ]; then
           if [ "$SUCCESS" = "true" ]; then
-            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-        ```
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+        \`\`\`
         ╔════════════════════════════════════════════╗
         ║       QUOTA SCHEDULER - PING RESULT        ║
         ╠════════════════════════════════════════════╣
-        EOF
-            echo "║  Account: $(printf '%-32s' "$ACCOUNT") ║" >> $GITHUB_STEP_SUMMARY
-            echo "║  Status:  ✓ $(printf '%-30s' "$STATUS") ║" >> $GITHUB_STEP_SUMMARY
-            echo "║  Time:    $(printf '%-32s' "$NOW") ║" >> $GITHUB_STEP_SUMMARY
-            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+        ║  Account: $(printf '%-32s' "$ACCOUNT")║
+        ║  Status:  ✓ $(printf '%-30s' "$STATUS")║
+        ║  Time:    $(printf '%-32s' "$NOW")║
         ╠════════════════════════════════════════════╣
-        ║       (\__/)                               ║
+        ║       (\\__/)                               ║
         ║       (o^.^)  "Quota ready!"               ║
         ║       |>  <>|                              ║
         ╚════════════════════════════════════════════╝
-        ```
+        \`\`\`
         EOF
           else
-            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-        ```
+            cat >> $GITHUB_STEP_SUMMARY << EOF
+        \`\`\`
         ╔════════════════════════════════════════════╗
         ║       QUOTA SCHEDULER - PING RESULT        ║
         ╠════════════════════════════════════════════╣
-        EOF
-            echo "║  Account: $(printf '%-32s' "$ACCOUNT") ║" >> $GITHUB_STEP_SUMMARY
-            echo "║  Status:  ✗ $(printf '%-30s' "$STATUS") ║" >> $GITHUB_STEP_SUMMARY
-            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+        ║  Account: $(printf '%-32s' "$ACCOUNT")║
+        ║  Status:  ✗ $(printf '%-30s' "$STATUS")║
         ╠════════════════════════════════════════════╣
-        ║       (\__/)                               ║
+        ║       (\\__/)                               ║
         ║       (T_T)   "Ping failed..."             ║
         ║       |>  <>|                              ║
         ╚════════════════════════════════════════════╝
-        ```
+        \`\`\`
         EOF
           fi
         else
@@ -178,5 +179,4 @@ runs:
           [ "$SUCCESS" = "true" ] && echo "**Window End:** $WINDOW_END" >> $GITHUB_STEP_SUMMARY
         fi
 
-        # Set summary output
         echo "summary=[$STATUS] $ACCOUNT @ $NOW" >> $GITHUB_OUTPUT
