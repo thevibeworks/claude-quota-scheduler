@@ -48,9 +48,6 @@ outputs:
   summary:
     description: "Human-readable summary"
     value: ${{ steps.result.outputs.summary }}
-  claude_response:
-    description: "What claude said/drew"
-    value: ${{ steps.ping.outputs.response }}
   bark_message:
     description: "Claude-generated notification message"
     value: ${{ steps.ping.outputs.bark_message }}
@@ -86,14 +83,17 @@ runs:
     - name: Ghost Ping
       id: ping
       shell: bash
+      env:
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.oauth_token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        ACCOUNT: ${{ inputs.account_name }}
+        DRY: ${{ inputs.dry_run }}
+        PROMPT: ${{ inputs.ping_prompt }}
+        MODEL: ${{ inputs.model }}
+        BARK_SUFFIX: "also write a funny one-liner (max 50 chars) for a push notification. put it on a line starting with BARK"
       run: |
-        ACCOUNT="${{ inputs.account_name }}"
-        DRY="${{ inputs.dry_run }}"
-        PROMPT="${{ inputs.ping_prompt }}"
-        MODEL="${{ inputs.model }}"
-
         if [ "$DRY" = "true" ]; then
-          echo "[DRY RUN] Would send: '$PROMPT' to model $MODEL"
+          echo "[DRY RUN] Would send to model $MODEL"
           echo "conclusion=success" >> $GITHUB_OUTPUT
           echo "bark_message=dry run - no actual ping" >> $GITHUB_OUTPUT
           exit 0
@@ -102,13 +102,10 @@ runs:
         echo "Sending ghost ping..."
         export PATH="$HOME/.local/bin:$PATH"
 
-        # append bark message request to prompt
-        BARK_TAG="BARK"
-        FULL_PROMPT="$PROMPT
+        FULL_PROMPT="${PROMPT}
 
-also write a funny one-liner (max 50 chars) for a push notification. put it on its own line starting with ${BARK_TAG}:"
+${BARK_SUFFIX}"
 
-        # capture output
         RESPONSE=$(timeout 120 claude -p "$FULL_PROMPT" \
           --model "$MODEL" \
           --max-turns 1 \
@@ -119,32 +116,15 @@ also write a funny one-liner (max 50 chars) for a push notification. put it on i
 
         if [ $EXIT_CODE -eq 0 ]; then
           echo "conclusion=success" >> $GITHUB_OUTPUT
-
-          # extract bark message (line starting with BARK:)
-          BARK_MSG=$(echo "$RESPONSE" | grep -i "^BARK:" | head -1 | sed 's/^BARK:[[:space:]]*//' | cut -c1-50)
-          if [ -z "$BARK_MSG" ]; then
-            BARK_MSG="claude woke up and did a thing"
-          fi
-
-          # escape for github output
+          BARK_MSG=$(echo "$RESPONSE" | grep -i "^BARK" | head -1 | sed 's/^BARK[^a-zA-Z]*//' | cut -c1-50)
+          [ -z "$BARK_MSG" ] && BARK_MSG="claude woke up"
           echo "bark_message=$BARK_MSG" >> $GITHUB_OUTPUT
-
-          # save full response (escape newlines)
-          {
-            echo 'response<<EOF'
-            echo "$RESPONSE"
-            echo 'EOF'
-          } >> $GITHUB_OUTPUT
-
           echo "Ping successful!"
         else
           echo "conclusion=failure" >> $GITHUB_OUTPUT
           echo "bark_message=claude refused to wake up" >> $GITHUB_OUTPUT
           echo "::warning::Ping failed or timed out"
         fi
-      env:
-        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.oauth_token }}
-        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
 
     - name: Result
       id: result
