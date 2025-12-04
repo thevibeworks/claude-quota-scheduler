@@ -80,7 +80,8 @@ function executeClaudePing(
   debug: boolean
 ): Promise<ClaudeResult> {
   return new Promise((resolve) => {
-    const args = ["--print", "--model", model, "--max-turns", "1", prompt];
+    // -p for print mode (non-interactive), --dangerously-skip-permissions for CI
+    const args = ["-p", prompt, "--model", model, "--max-turns", "1", "--dangerously-skip-permissions"];
 
     if (debug) {
       console.log(`[DEBUG] Executing: ${claudePath} ${args.join(" ")}`);
