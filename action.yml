@@ -1,5 +1,5 @@
 name: "Claude Quota Scheduler"
-description: "Optimize your Claude Code quota with automated ghost pings. Never waste a quota refresh again."
+description: "Optimize Claude Code quota with automated ghost pings. Never waste a quota refresh again."
 author: "Vibe Works"
 
 branding:
@@ -7,174 +7,176 @@ branding:
   color: "orange"
 
 inputs:
+  # Authentication
   oauth_token:
-    description: "Claude Code OAuth token (primary account)"
+    description: "Claude Code OAuth token"
+    required: false
+  anthropic_api_key:
+    description: "Anthropic API key (alternative to oauth_token)"
     required: false
 
-  oauth_tokens:
-    description: "JSON object mapping account names to OAuth tokens for multi-account setup"
+  # Scheduler config
+  account_name:
+    description: "Account name for logs/identification"
     required: false
-
-  config_file:
-    description: "Path to YAML config file (relative to repo root)"
-    required: false
-    default: ""
-
+    default: "default"
   timezone:
-    description: "IANA timezone name (e.g., 'America/New_York', 'Asia/Shanghai')"
+    description: "IANA timezone (e.g., 'Asia/Shanghai')"
     required: false
     default: "UTC"
-
   ping_prompt:
-    description: "Minimal prompt to send for ghost ping"
+    description: "Prompt for ghost ping"
     required: false
     default: "ping"
-
   model:
-    description: "Claude model to use for ping"
+    description: "Model to use"
     required: false
     default: "claude-sonnet-4-20250514"
 
-  accounts:
-    description: "Comma-separated list of account names to ping (for matrix builds)"
-    required: false
-    default: "default"
-
-  account_name:
-    description: "Single account name (for matrix job naming)"
-    required: false
-    default: ""
-
+  # Options
   dry_run:
-    description: "Log actions without actually pinging"
+    description: "Log without pinging"
     required: false
     default: "false"
-
-  debug:
-    description: "Enable debug logging"
-    required: false
-    default: "false"
-
   summary_style:
-    description: "GitHub summary style: minimal, detailed, or ascii-art"
+    description: "Summary style: minimal, detailed, ascii-art"
     required: false
-    default: "detailed"
+    default: "ascii-art"
 
-  notification_webhook:
-    description: "Webhook URL for notifications (optional)"
-    required: false
-
-  notification_on_success:
-    description: "Send notification on success"
+  # Cloud providers (pass-through to base-action)
+  use_bedrock:
+    description: "Use AWS Bedrock"
     required: false
     default: "false"
-
-  notification_on_failure:
-    description: "Send notification on failure"
+  use_vertex:
+    description: "Use Google Vertex AI"
     required: false
-    default: "true"
-
-  claude_version:
-    description: "Claude CLI version to install"
-    required: false
-    default: "latest"
-
-  path_to_claude_executable:
-    description: "Path to existing Claude executable (skip install)"
-    required: false
-    default: ""
+    default: "false"
 
 outputs:
   success:
-    description: "Whether all pings succeeded"
-    value: ${{ steps.scheduler.outputs.success }}
-
-  accounts_pinged:
-    description: "JSON array of successfully pinged accounts"
-    value: ${{ steps.scheduler.outputs.accounts_pinged }}
-
-  accounts_failed:
-    description: "JSON array of failed accounts"
-    value: ${{ steps.scheduler.outputs.accounts_failed }}
-
-  next_windows:
-    description: "JSON object mapping accounts to their next quota window end times"
-    value: ${{ steps.scheduler.outputs.next_windows }}
-
+    description: "Whether ping succeeded"
+    value: ${{ steps.result.outputs.success }}
+  window_end:
+    description: "Quota window end time (ISO 8601)"
+    value: ${{ steps.result.outputs.window_end }}
   summary:
-    description: "Human-readable summary of the run"
-    value: ${{ steps.scheduler.outputs.summary }}
+    description: "Human-readable summary"
+    value: ${{ steps.result.outputs.summary }}
 
 runs:
   using: "composite"
   steps:
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v2
+    - name: Start
+      id: start
+      shell: bash
+      run: |
+        echo "=============================================="
+        echo "  Claude Quota Scheduler"
+        echo "  Account: ${{ inputs.account_name }}"
+        echo "  Timezone: ${{ inputs.timezone }}"
+        echo "=============================================="
+        echo "start_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+    - name: Dry Run
+      if: inputs.dry_run == 'true'
+      id: dry_run
+      shell: bash
+      run: |
+        echo "[DRY RUN] Would send: '${{ inputs.ping_prompt }}'"
+        echo "conclusion=success" >> $GITHUB_OUTPUT
+
+    - name: Ghost Ping
+      if: inputs.dry_run != 'true'
+      id: ping
+      uses: anthropics/claude-code-action-base@beta
       with:
-        bun-version: "1.2.11"
+        prompt: ${{ inputs.ping_prompt }}
+        claude_code_oauth_token: ${{ inputs.oauth_token }}
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        use_bedrock: ${{ inputs.use_bedrock }}
+        use_vertex: ${{ inputs.use_vertex }}
+        claude_args: "--model ${{ inputs.model }} --max-turns 1 --dangerously-skip-permissions"
 
-    - name: Install dependencies
-      shell: bash
-      run: |
-        cd ${{ github.action_path }}
-        bun install --frozen-lockfile 2>/dev/null || bun install
-
-    - name: Install Claude CLI
-      if: inputs.path_to_claude_executable == '' && inputs.dry_run != 'true'
-      shell: bash
-      run: |
-        CLAUDE_VERSION="${{ inputs.claude_version }}"
-        echo "Installing Claude CLI${CLAUDE_VERSION:+ v$CLAUDE_VERSION}..."
-
-        for attempt in 1 2 3; do
-          echo "Attempt $attempt..."
-          if curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_VERSION}; then
-            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-            echo "Claude CLI installed successfully"
-            break
-          fi
-          if [ $attempt -eq 3 ]; then
-            echo "::error::Failed to install Claude CLI after 3 attempts"
-            exit 1
-          fi
-          sleep 5
-        done
-
-    - name: Setup custom Claude path
-      if: inputs.path_to_claude_executable != ''
-      shell: bash
-      run: |
-        CLAUDE_DIR=$(dirname "${{ inputs.path_to_claude_executable }}")
-        echo "$CLAUDE_DIR" >> "$GITHUB_PATH"
-        echo "Using custom Claude executable: ${{ inputs.path_to_claude_executable }}"
-
-    - name: Run Quota Scheduler
-      id: scheduler
-      shell: bash
-      run: |
-        bun run ${{ github.action_path }}/src/index.ts
-      env:
-        INPUT_OAUTH_TOKEN: ${{ inputs.oauth_token }}
-        INPUT_OAUTH_TOKENS: ${{ inputs.oauth_tokens }}
-        INPUT_CONFIG_FILE: ${{ inputs.config_file }}
-        INPUT_TIMEZONE: ${{ inputs.timezone }}
-        INPUT_PING_PROMPT: ${{ inputs.ping_prompt }}
-        INPUT_MODEL: ${{ inputs.model }}
-        INPUT_ACCOUNTS: ${{ inputs.accounts }}
-        INPUT_ACCOUNT_NAME: ${{ inputs.account_name }}
-        INPUT_DRY_RUN: ${{ inputs.dry_run }}
-        INPUT_DEBUG: ${{ inputs.debug }}
-        INPUT_SUMMARY_STYLE: ${{ inputs.summary_style }}
-        INPUT_NOTIFICATION_WEBHOOK: ${{ inputs.notification_webhook }}
-        INPUT_NOTIFICATION_ON_SUCCESS: ${{ inputs.notification_on_success }}
-        INPUT_NOTIFICATION_ON_FAILURE: ${{ inputs.notification_on_failure }}
-        INPUT_PATH_TO_CLAUDE_EXECUTABLE: ${{ inputs.path_to_claude_executable }}
-        GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
-
-    - name: Post Summary
+    - name: Result
+      id: result
       if: always()
       shell: bash
       run: |
-        if [ -f "${{ runner.temp }}/quota-scheduler-summary.md" ]; then
-          cat "${{ runner.temp }}/quota-scheduler-summary.md" >> $GITHUB_STEP_SUMMARY
+        ACCOUNT="${{ inputs.account_name }}"
+        TZ="${{ inputs.timezone }}"
+        STYLE="${{ inputs.summary_style }}"
+        DRY="${{ inputs.dry_run }}"
+
+        # Get conclusion from either dry_run or ping step
+        if [ "$DRY" = "true" ]; then
+          CONCLUSION="${{ steps.dry_run.outputs.conclusion }}"
+        else
+          CONCLUSION="${{ steps.ping.outputs.conclusion }}"
         fi
+
+        # Calculate window end (5h from now)
+        WINDOW_END=$(date -u -d "+5 hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+5H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+
+        if [ "$CONCLUSION" = "success" ]; then
+          SUCCESS="true"
+          STATUS="OK"
+        else
+          SUCCESS="false"
+          STATUS="FAILED"
+        fi
+        [ "$DRY" = "true" ] && STATUS="DRY_RUN"
+
+        echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+        echo "window_end=$WINDOW_END" >> $GITHUB_OUTPUT
+
+        # Generate summary
+        NOW=$(TZ="$TZ" date "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date "+%Y-%m-%d %H:%M:%S")
+
+        if [ "$STYLE" = "ascii-art" ]; then
+          if [ "$SUCCESS" = "true" ]; then
+            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+        ```
+        ╔════════════════════════════════════════════╗
+        ║       QUOTA SCHEDULER - PING RESULT        ║
+        ╠════════════════════════════════════════════╣
+        EOF
+            echo "║  Account: $(printf '%-32s' "$ACCOUNT") ║" >> $GITHUB_STEP_SUMMARY
+            echo "║  Status:  ✓ $(printf '%-30s' "$STATUS") ║" >> $GITHUB_STEP_SUMMARY
+            echo "║  Time:    $(printf '%-32s' "$NOW") ║" >> $GITHUB_STEP_SUMMARY
+            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+        ╠════════════════════════════════════════════╣
+        ║       (\__/)                               ║
+        ║       (o^.^)  "Quota ready!"               ║
+        ║       |>  <>|                              ║
+        ╚════════════════════════════════════════════╝
+        ```
+        EOF
+          else
+            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+        ```
+        ╔════════════════════════════════════════════╗
+        ║       QUOTA SCHEDULER - PING RESULT        ║
+        ╠════════════════════════════════════════════╣
+        EOF
+            echo "║  Account: $(printf '%-32s' "$ACCOUNT") ║" >> $GITHUB_STEP_SUMMARY
+            echo "║  Status:  ✗ $(printf '%-30s' "$STATUS") ║" >> $GITHUB_STEP_SUMMARY
+            cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+        ╠════════════════════════════════════════════╣
+        ║       (\__/)                               ║
+        ║       (T_T)   "Ping failed..."             ║
+        ║       |>  <>|                              ║
+        ╚════════════════════════════════════════════╝
+        ```
+        EOF
+          fi
+        else
+          echo "## Quota Scheduler: $ACCOUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** $STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $NOW ($TZ)" >> $GITHUB_STEP_SUMMARY
+          [ "$SUCCESS" = "true" ] && echo "**Window End:** $WINDOW_END" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Set summary output
+        echo "summary=[$STATUS] $ACCOUNT @ $NOW" >> $GITHUB_OUTPUT
