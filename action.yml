@@ -116,8 +116,7 @@ ${BARK_SUFFIX}"
 
         if [ $EXIT_CODE -eq 0 ]; then
           echo "conclusion=success" >> $GITHUB_OUTPUT
-          # grab last non-empty line as the roast
-          BARK_MSG=$(echo "$RESPONSE" | grep -v '^$' | grep -v '^\`\`\`' | tail -1 | cut -c1-50)
+          BARK_MSG=$(echo "$RESPONSE" | grep -v '^$' | tail -1 | cut -c1-50)
           [ -z "$BARK_MSG" ] && BARK_MSG="claude woke up confused"
           echo "bark_message=$BARK_MSG" >> $GITHUB_OUTPUT
           echo "Ping successful!"
