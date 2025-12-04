@@ -22,13 +22,13 @@ inputs:
     required: false
     default: "UTC"
   ping_prompt:
-    description: "Prompt for ghost ping"
+    description: "Prompt for ghost ping (be creative!)"
     required: false
-    default: "ping"
+    default: "draw a tiny ascii art of yourself waking up from a nap, yawning. keep it under 5 lines."
   model:
-    description: "Model to use"
+    description: "Model to use (sonnet, haiku, opus)"
     required: false
-    default: "claude-sonnet-4-20250514"
+    default: "sonnet"
   dry_run:
     description: "Log without pinging"
     required: false

@@ -68,8 +68,8 @@ jobs:
 | `anthropic_api_key` | API key (alt auth) | - |
 | `account_name` | Name for logs | `default` |
 | `timezone` | IANA timezone | `UTC` |
-| `ping_prompt` | What to send | `ping` |
-| `model` | Model to use | `claude-sonnet-4-20250514` |
+| `ping_prompt` | What to send (be creative!) | `"draw ascii art of yourself waking up"` |
+| `model` | Model to use | `sonnet` |
 | `dry_run` | Log without ping | `false` |
 | `summary_style` | `minimal`/`detailed`/`ascii-art` | `ascii-art` |
 | `use_bedrock` | Use AWS Bedrock | `false` |
