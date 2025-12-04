@@ -1,0 +1,37 @@
+# Example: Config File Based Scheduler
+#
+# This workflow uses a YAML config file for advanced configuration.
+# The config file allows for more complex setups like focus sessions,
+# multiple accounts with different settings, and custom notifications.
+#
+# Setup:
+# 1. Create .github/claude-quota.yml with your configuration
+# 2. Add required secrets referenced in the config
+# 3. Adjust cron to run frequently (config file filters actual pings)
+
+name: Claude Quota Scheduler (Config File)
+
+on:
+  schedule:
+    # Run every hour - config file determines actual ping times
+    - cron: "0 * * * *"
+
+  workflow_dispatch:
+
+jobs:
+  refresh-quota:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Refresh Claude Quota
+        uses: thevibeworks/claude-quota-scheduler@v1
+        with:
+          config_file: ".github/claude-quota.yml"
+        env:
+          # Tokens referenced in config file
+          CLAUDE_OAUTH_PRIMARY: ${{ secrets.CLAUDE_OAUTH_PRIMARY }}
+          CLAUDE_OAUTH_WORK: ${{ secrets.CLAUDE_OAUTH_WORK }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,62 @@
+# Example: Multi-Account Claude Quota Scheduler
+#
+# This workflow demonstrates how to manage multiple Claude accounts
+# using GitHub's matrix strategy for parallel execution.
+#
+# Setup:
+# 1. Add secrets for each account: CLAUDE_OAUTH_PRIMARY, CLAUDE_OAUTH_WORK, etc.
+# 2. Modify the matrix to match your account names
+# 3. Adjust schedule and timezone as needed
+
+name: Claude Quota Scheduler (Multi-Account)
+
+on:
+  schedule:
+    # Weekdays: 08:00, 13:00, 18:00 UTC
+    - cron: "0 8,13,18 * * 1-5"
+    # Weekends: 10:00, 18:00 UTC
+    - cron: "0 10,18 * * 0,6"
+
+  workflow_dispatch:
+    inputs:
+      accounts:
+        description: "Accounts to ping (comma-separated, or 'all')"
+        required: false
+        default: "all"
+      dry_run:
+        description: "Dry run mode"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  refresh-quota:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        account: [primary, work, personal]
+
+    steps:
+      - name: Check if account should run
+        id: check
+        run: |
+          INPUT_ACCOUNTS="${{ inputs.accounts || 'all' }}"
+          CURRENT_ACCOUNT="${{ matrix.account }}"
+
+          if [ "$INPUT_ACCOUNTS" = "all" ] || echo "$INPUT_ACCOUNTS" | grep -q "$CURRENT_ACCOUNT"; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Refresh Quota - ${{ matrix.account }}
+        if: steps.check.outputs.should_run == 'true'
+        uses: thevibeworks/claude-quota-scheduler@v1
+        with:
+          account_name: ${{ matrix.account }}
+          oauth_token: ${{ secrets[format('CLAUDE_OAUTH_{0}', matrix.account)] }}
+          timezone: "America/New_York"
+          dry_run: ${{ inputs.dry_run || 'false' }}
+          summary_style: "ascii-art"

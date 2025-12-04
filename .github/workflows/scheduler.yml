@@ -1,0 +1,43 @@
+# Example: Basic Claude Quota Scheduler
+#
+# This workflow pings Claude at 09:00, 14:00, and 19:00 UTC daily
+# to ensure your quota windows align with common focus sessions.
+#
+# Setup:
+# 1. Add your CLAUDE_CODE_OAUTH_TOKEN to repository secrets
+# 2. Adjust the cron schedule and timezone for your needs
+# 3. Enable the workflow
+
+name: Claude Quota Scheduler
+
+on:
+  schedule:
+    # 09:00, 14:00, 19:00 UTC - adjust to your timezone
+    - cron: "0 9,14,19 * * *"
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (no actual ping)"
+        required: false
+        default: "false"
+        type: boolean
+      debug:
+        description: "Enable debug logging"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  refresh-quota:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Refresh Claude Quota
+        uses: thevibeworks/claude-quota-scheduler@v1
+        with:
+          oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          timezone: "UTC"
+          dry_run: ${{ inputs.dry_run || 'false' }}
+          debug: ${{ inputs.debug || 'false' }}
+          summary_style: "detailed"

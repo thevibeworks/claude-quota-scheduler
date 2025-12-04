@@ -1,0 +1,33 @@
+# Multi-Account Configuration
+# Manage multiple Claude accounts with different settings
+
+version: "1"
+timezone: "America/New_York"
+
+settings:
+  ping_prompt: "ping"
+  model: "claude-sonnet-4-20250514"
+  parallel: true
+  retry:
+    attempts: 3
+    delay_ms: 5000
+    backoff_multiplier: 2
+
+accounts:
+  primary:
+    token_secret: "CLAUDE_OAUTH_PRIMARY"
+    enabled: true
+    # Uses default ping_prompt and model
+
+  work:
+    token_secret: "CLAUDE_OAUTH_WORK"
+    enabled: true
+    model: "claude-sonnet-4-20250514"
+
+  personal:
+    token_secret: "CLAUDE_OAUTH_PERSONAL"
+    enabled: true
+
+  experimental:
+    token_secret: "CLAUDE_OAUTH_EXPERIMENTAL"
+    enabled: false # Disabled but configured
